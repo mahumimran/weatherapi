@@ -1,0 +1,10 @@
+# Environment variables (API keys/Secrets)
+.env
+
+# Python Cache & Compiled Files
+__pycache__/
+*.py[cod]
+
+# Virtual Environment (Agar aapne banaya ho)
+venv/
+env/

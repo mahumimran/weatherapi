@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en" data-weather="clear">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WeatherDial — Instrument Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     TOKENS — one palette per weather state, swapped via [data-weather]
+     ============================================================ */
+  :root{
+    --font-display: 'Fraunces', serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --font-body: 'Inter', sans-serif;
+
+    --radius: 22px;
+    --needle-angle: 0deg; /* CLEAR = 0deg top */
+    --transition-slow: 900ms cubic-bezier(.22,1,.36,1);
+  }
+
+  html[data-weather="clear"]{
+    --bg-1:#8ECAE6; --bg-2:#DCF3FF;
+    --ink:#0B2B3C; --ink-soft:#3A5A68;
+    --accent:#1B6E8C;
+    --glass-bg: rgba(255,255,255,0.38);
+    --glass-border: rgba(255,255,255,0.55);
+    --needle-angle: 0deg;
+  }
+  html[data-weather="hot"]{
+    --bg-1:#FF8A3D; --bg-2:#FFD447;
+    --ink:#5A1F00; --ink-soft:#7A3300;
+    --accent:#C1440E;
+    --glass-bg: rgba(255,255,255,0.28);
+    --glass-border: rgba(255,255,255,0.45);
+    --needle-angle: 90deg;
+  }
+  html[data-weather="rain"]{
+    --bg-1:#3A4750; --bg-2:#6B7A85;
+    --ink:#EDF2F5; --ink-soft:#C6D2D9;
+    --accent:#8FB8FF;
+    --glass-bg: rgba(20,26,30,0.35);
+    --glass-border: rgba(255,255,255,0.14);
+    --needle-angle: 180deg;
+  }
+  html[data-weather="cold"]{
+    --bg-1:#F3FAFF; --bg-2:#BFE3FF;
+    --ink:#0B3D5C; --ink-soft:#3E6A88;
+    --accent:#3E8FBF;
+    --glass-bg: rgba(255,255,255,0.5);
+    --glass-border: rgba(255,255,255,0.7);
+    --needle-angle: 270deg;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    font-family: var(--font-body);
+    color: var(--ink);
+    min-height:100vh;
+    overflow-x:hidden;
+    transition: color var(--transition-slow);
+  }
+
+  /* ============================================================
+     BACKGROUND LAYER
+     ============================================================ */
+  .bg{
+    position:fixed; inset:0; z-index:-3;
+    background: linear-gradient(160deg, var(--bg-1), var(--bg-2));
+    transition: background var(--transition-slow);
+  }
+  /* Heat shimmer: SVG turbulence filter applied only in hot state */
+  html[data-weather="hot"] .bg{ filter: url(#heatDistort); }
+
+  /* Fog overlay — cold state only */
+  .fog{
+    position:fixed; inset:-10% -10%; z-index:-2;
+    pointer-events:none;
+    opacity:0;
+    transition: opacity var(--transition-slow);
+    background:
+      radial-gradient(ellipse 60% 30% at 20% 30%, rgba(255,255,255,0.85), transparent 60%),
+      radial-gradient(ellipse 50% 25% at 80% 70%, rgba(255,255,255,0.7), transparent 65%);
+    filter: blur(18px);
+    background-size: 200% 200%;
+    animation: fogDrift 22s ease-in-out infinite alternate;
+  }
+  html[data-weather="cold"] .fog{ opacity:0.8; }
+  @keyframes fogDrift{
+    0%{ background-position: 0% 50%, 100% 50%; }
+    100%{ background-position: 30% 60%, 60% 40%; }
+  }
+
+  /* Rain overlay — rain state only */
+  .rain-layer{
+    position:fixed; inset:0; z-index:-1;
+    pointer-events:none;
+    overflow:hidden;
+    opacity:0;
+    transition: opacity 500ms ease;
+  }
+  html[data-weather="rain"] .rain-layer{ opacity:1; }
+  .drop{
+    position:absolute; top:-10%;
+    width:2px; height:70px;
+    background:linear-gradient(to bottom, transparent, rgba(200,225,255,0.65));
+    animation-name: dropFall;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  html[data-weather="rain"] .drop{ animation-play-state: running; }
+  html:not([data-weather="rain"]) .drop{ animation-play-state: paused; }
+  @keyframes dropFall{
+    0%{ transform: translateY(-10%); }
+    100%{ transform: translateY(115vh); }
+  }
+
+  /* ============================================================
+     LAYOUT
+     ============================================================ */
+  .wrap{
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+    display:flex; flex-direction:column; gap:28px;
+    position:relative; z-index:1;
+  }
+
+  /* --- Header --- */
+  .header{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    flex-wrap:wrap; gap:12px;
+  }
+  .location h1{
+    font-family: var(--font-display);
+    font-weight:600; font-size: clamp(28px, 4vw, 40px);
+    margin:0; letter-spacing:-0.01em;
+  }
+  .location p{
+    margin:4px 0 0; font-family: var(--font-mono);
+    font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color: var(--ink-soft);
+  }
+
+  /* State switcher (test controls) */
+  .switcher{
+    display:flex; gap:6px; padding:5px;
+    background: var(--glass-bg);
+    border:1px solid var(--glass-border);
+    border-radius: 999px;
+    backdrop-filter: blur(14px);
+  }
+  .switcher button{
+    font-family: var(--font-mono);
+    font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    border:none; background:transparent; color: var(--ink);
+    padding:8px 14px; border-radius:999px; cursor:pointer;
+    transition: background 200ms ease, color 200ms ease;
+    opacity:0.65;
+  }
+  .switcher button.active{
+    background: var(--ink); color: var(--bg-2);
+    opacity:1;
+  }
+
+  /* --- Instrument card (dial + reading) --- */
+  .instrument{
+    background: var(--glass-bg);
+    border:1px solid var(--glass-border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 36px;
+    display:grid;
+    grid-template-columns: 200px 1fr;
+    align-items:center;
+    gap: 28px;
+    transition: background var(--transition-slow), border-color var(--transition-slow);
+  }
+
+  /* Dial */
+  .dial{ position:relative; width:180px; height:180px; }
+  .dial svg{ width:100%; height:100%; overflow:visible; }
+  .tick-label{
+    font-family: var(--font-mono); font-size:9px; letter-spacing:0.06em;
+    fill: var(--ink-soft);
+  }
+  .needle{
+    transform-origin: 90px 90px;
+    transform: rotate(var(--needle-angle));
+    transition: transform var(--transition-slow);
+  }
+  .needle-hub{ fill: var(--ink); }
+  .needle-arm{ stroke: var(--accent); stroke-width:3; stroke-linecap:round; }
+
+  .icon-stack{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  .icon-stack svg{
+    position:absolute; width:56px; height:56px;
+    opacity:0; transform: scale(0.85);
+    transition: opacity 500ms ease, transform 500ms ease;
+  }
+  html[data-weather="clear"] .icon-cloud,
+  html[data-weather="hot"] .icon-sun,
+  html[data-weather="rain"] .icon-rain,
+  html[data-weather="cold"] .icon-snow{
+    opacity:1; transform: scale(1);
+  }
+
+  /* Sweat drop — hot only */
+  .sweat{
+    position:absolute; top:22px; right:36px;
+    width:14px; height:18px; opacity:0;
+    transition: opacity 400ms ease;
+  }
+  html[data-weather="hot"] .sweat{ opacity:1; animation: dripBounce 1.6s ease-in-out infinite; }
+  @keyframes dripBounce{
+    0%,100%{ transform: translateY(0); }
+    50%{ transform: translateY(6px); }
+  }
+
+  /* Reading */
+  .reading .temp{
+    font-family: var(--font-display); font-weight:700;
+    font-size: clamp(56px, 9vw, 88px);
+    line-height:1; margin:0; letter-spacing:-0.02em;
+  }
+  .reading .condition{
+    font-family: var(--font-mono); font-size:13px;
+    letter-spacing:0.1em; text-transform:uppercase;
+    color: var(--accent); margin-top:8px;
+  }
+
+  /* --- Extended info --- */
+  .info-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap:14px;
+  }
+  .info-card{
+    background: var(--glass-bg);
+    border:1px solid var(--glass-border);
+    border-radius: 16px;
+    backdrop-filter: blur(14px);
+    padding: 16px 18px;
+    transition: background var(--transition-slow);
+  }
+  .info-card .label{
+    font-family: var(--font-mono); font-size:10px; letter-spacing:0.12em;
+    text-transform:uppercase; color: var(--ink-soft); margin:0 0 6px;
+  }
+  .info-card .value{
+    font-family: var(--font-display); font-weight:600; font-size:22px; margin:0;
+  }
+
+  /* --- Forecast --- */
+  .forecast-label{
+    font-family: var(--font-mono); font-size:11px; letter-spacing:0.14em;
+    text-transform:uppercase; color: var(--ink-soft); margin: 0 0 -6px 2px;
+  }
+  .forecast-row{
+    display:flex; gap:12px; overflow-x:auto; padding-bottom:6px;
+    scrollbar-width: thin;
+  }
+  .forecast-card{
+    flex: 0 0 108px;
+    background: var(--glass-bg);
+    border:1px solid var(--glass-border);
+    border-radius: 16px;
+    backdrop-filter: blur(14px);
+    padding: 16px 12px;
+    text-align:center;
+    transition: background var(--transition-slow);
+  }
+  .forecast-card .day{
+    font-family: var(--font-mono); font-size:11px; letter-spacing:0.08em;
+    color: var(--ink-soft); margin:0 0 10px;
+  }
+  .forecast-card svg{ width:30px; height:30px; margin-bottom:8px; }
+  .forecast-card .hi{ font-family: var(--font-display); font-weight:600; font-size:17px; }
+  .forecast-card .lo{ font-family: var(--font-mono); font-size:12px; color: var(--ink-soft); }
+
+  /* --- Search bar (connects to the FastAPI /api/weather endpoint) --- */
+  .search-bar{
+    display:flex; gap:8px;
+    background: var(--glass-bg);
+    border:1px solid var(--glass-border);
+    border-radius: 999px;
+    backdrop-filter: blur(14px);
+    padding: 6px 6px 6px 18px;
+    align-items:center;
+  }
+  .search-bar input{
+    flex:1; border:none; background:transparent; outline:none;
+    font-family: var(--font-body); font-size:14px; color: var(--ink);
+  }
+  .search-bar input::placeholder{ color: var(--ink-soft); opacity:0.8; }
+  .search-bar button{
+    font-family: var(--font-mono); font-size:11px; letter-spacing:0.08em;
+    text-transform:uppercase; border:none; cursor:pointer;
+    background: var(--ink); color: var(--bg-2);
+    padding:10px 18px; border-radius:999px;
+  }
+  .search-bar button:disabled{ opacity:0.5; cursor:default; }
+  .agent-reply{
+    font-family: var(--font-body); font-size:14px; line-height:1.5;
+    color: var(--ink); margin: -14px 2px 0;
+    min-height: 1.4em;
+  }
+
+  @media (max-width: 560px){
+    .instrument{ grid-template-columns: 1fr; text-align:center; }
+    .dial{ margin: 0 auto; }
+    .icon-stack{ position:relative; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- background + effect layers -->
+  <div class="bg"></div>
+  <div class="fog"></div>
+  <div class="rain-layer" id="rainLayer"></div>
+
+  <!-- hidden SVG filter def for the heat-shimmer distortion -->
+  <svg width="0" height="0" style="position:absolute">
+    <filter id="heatDistort">
+      <feTurbulence type="fractalNoise" numOctaves="2" seed="7" result="noise">
+        <animate attributeName="baseFrequency" dur="6s" values="0.010 0.02;0.014 0.028;0.010 0.02" repeatCount="indefinite" />
+      </feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="14" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+  </svg>
+
+  <div class="wrap">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="location">
+        <h1>Lahore, Pakistan</h1>
+        <p>Station 24.86°N · Updated just now</p>
+      </div>
+      <div class="switcher" id="switcher">
+        <button data-state="clear">Clear</button>
+        <button data-state="hot">Hot</button>
+        <button data-state="rain">Rain</button>
+        <button data-state="cold">Cold</button>
+      </div>
+    </div>
+
+    <!-- Live search — calls the FastAPI weather agent -->
+    <div class="search-bar">
+      <input id="queryInput" type="text" placeholder="Ask e.g. 'What's the weather in Lahore?'" />
+      <button id="askBtn">Ask</button>
+    </div>
+    <p class="agent-reply" id="agentReply"></p>
+
+    <!-- Main instrument: dial + reading -->
+    <div class="instrument">
+      <div class="dial">
+        <svg viewBox="0 0 180 180">
+          <circle cx="90" cy="90" r="78" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="1.5" />
+          <!-- ticks -->
+          <text class="tick-label" x="90" y="16" text-anchor="middle">CLEAR</text>
+          <text class="tick-label" x="168" y="94" text-anchor="middle">HOT</text>
+          <text class="tick-label" x="90" y="176" text-anchor="middle">RAIN</text>
+          <text class="tick-label" x="12" y="94" text-anchor="middle">COLD</text>
+          <!-- needle -->
+          <g class="needle">
+            <line class="needle-arm" x1="90" y1="90" x2="90" y2="26" />
+            <circle class="needle-hub" cx="90" cy="90" r="6" />
+          </g>
+        </svg>
+        <div class="icon-stack">
+          <!-- Sun -->
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6">
+            <circle cx="12" cy="12" r="5" fill="var(--accent)" stroke="none"/>
+            <g stroke-linecap="round">
+              <line x1="12" y1="1.5" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="22.5"/>
+              <line x1="1.5" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="22.5" y2="12"/>
+              <line x1="4.4" y1="4.4" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19.6" y2="19.6"/>
+              <line x1="4.4" y1="19.6" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19.6" y2="4.4"/>
+            </g>
+          </svg>
+          <!-- Rain cloud -->
+          <svg class="icon-rain" viewBox="0 0 24 24" fill="none">
+            <path d="M6 12a4.5 4.5 0 0 1 8.7-1.6A4 4 0 0 1 17 18H6.5A3.5 3.5 0 0 1 6 12Z" fill="var(--accent)" opacity="0.85"/>
+            <g stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round">
+              <line x1="8" y1="20" x2="7" y2="22.5"/>
+              <line x1="12" y1="20" x2="11" y2="22.5"/>
+              <line x1="16" y1="20" x2="15" y2="22.5"/>
+            </g>
+          </svg>
+          <!-- Snowflake -->
+          <svg class="icon-snow" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round">
+            <g>
+              <line x1="12" y1="2" x2="12" y2="22"/>
+              <line x1="4" y1="7" x2="20" y2="17"/>
+              <line x1="4" y1="17" x2="20" y2="7"/>
+              <line x1="9" y1="4" x2="12" y2="7"/><line x1="15" y1="4" x2="12" y2="7"/>
+              <line x1="9" y1="20" x2="12" y2="17"/><line x1="15" y1="20" x2="12" y2="17"/>
+            </g>
+          </svg>
+          <!-- Cloud (clear/cloudy default) -->
+          <svg class="icon-cloud" viewBox="0 0 24 24" fill="var(--accent)" opacity="0.9">
+            <path d="M7 18a4.5 4.5 0 0 1 .6-8.96A5.5 5.5 0 0 1 18 11a3.75 3.75 0 0 1-.9 7H7Z"/>
+          </svg>
+        </div>
+        <!-- sweat drop, hot state only -->
+        <svg class="sweat" viewBox="0 0 14 18" fill="var(--accent)">
+          <path d="M7 0C7 6 0 8.5 0 12.5A7 7 0 0 0 14 12.5C14 8.5 7 6 7 0Z"/>
+        </svg>
+      </div>
+
+      <div class="reading">
+        <p class="temp" id="tempReading">27°C</p>
+        <p class="condition" id="conditionLabel">Clear skies</p>
+      </div>
+    </div>
+
+    <!-- Extended info -->
+    <div class="info-grid">
+      <div class="info-card"><p class="label">Humidity</p><p class="value" id="humidityVal">44%</p></div>
+      <div class="info-card"><p class="label">Wind Speed</p><p class="value" id="windVal">11 km/h</p></div>
+      <div class="info-card"><p class="label">Feels Like</p><p class="value" id="feelsVal">29°C</p></div>
+      <div class="info-card"><p class="label">Visibility</p><p class="value" id="visVal">10 km</p></div>
+    </div>
+
+    <!-- Forecast -->
+    <p class="forecast-label">5-Day Forecast</p>
+    <div class="forecast-row" id="forecastRow"></div>
+
+  </div>
+
+<script>
+  // ============================================================
+  // STATE DATA — swap this object for a real API response shape
+  // ============================================================
+  const STATES = {
+    clear: { temp: 27, feels: 29, condition: 'Clear skies', humidity: '44%', wind: '11 km/h', vis: '10 km' },
+    hot:   { temp: 38, feels: 42, condition: 'Extreme heat', humidity: '21%', wind: '8 km/h',  vis: '9 km'  },
+    rain:  { temp: 19, feels: 18, condition: 'Steady rain',  humidity: '87%', wind: '19 km/h', vis: '4 km'  },
+    cold:  { temp: 2,  feels: -2, condition: 'Snow & fog',   humidity: '68%', wind: '14 km/h', vis: '2 km'  },
+  };
+
+  const FORECAST = [
+    { day:'MON', type:'clear', hi:27, lo:18 },
+    { day:'TUE', type:'hot',   hi:36, lo:24 },
+    { day:'WED', type:'hot',   hi:39, lo:26 },
+    { day:'THU', type:'rain',  hi:22, lo:17 },
+    { day:'FRI', type:'cold',  hi:6,  lo:-1 },
+  ];
+
+  const ICONS = {
+    clear: `<path d="M7 18a4.5 4.5 0 0 1 .6-8.96A5.5 5.5 0 0 1 18 11a3.75 3.75 0 0 1-.9 7H7Z" />`,
+    hot:   `<circle cx="12" cy="12" r="5"/>`,
+    rain:  `<path d="M6 12a4.5 4.5 0 0 1 8.7-1.6A4 4 0 0 1 17 18H6.5A3.5 3.5 0 0 1 6 12Z"/>`,
+    cold:  `<g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none">
+              <line x1="12" y1="2" x2="12" y2="22"/><line x1="4" y1="7" x2="20" y2="17"/><line x1="4" y1="17" x2="20" y2="7"/>
+            </g>`,
+  };
+
+  /**
+   * Switches the entire UI to a given weather state.
+   * This is the single entry point you'd call after a real API response,
+   * e.g.  setWeatherState(apiResult.condition.toLowerCase())
+   */
+  function setWeatherState(state){
+    if(!STATES[state]) return;
+    const s = STATES[state];
+
+    document.documentElement.setAttribute('data-weather', state);
+    document.getElementById('tempReading').textContent = `${s.temp}°C`;
+    document.getElementById('conditionLabel').textContent = s.condition;
+    document.getElementById('humidityVal').textContent = s.humidity;
+    document.getElementById('windVal').textContent = s.wind;
+    document.getElementById('feelsVal').textContent = `${s.feels}°C`;
+    document.getElementById('visVal').textContent = s.vis;
+
+    document.querySelectorAll('#switcher button').forEach(b=>{
+      b.classList.toggle('active', b.dataset.state === state);
+    });
+  }
+
+  // ============================================================
+  // BACKEND CONNECTION — calls the FastAPI /api/weather endpoint
+  // ============================================================
+  const API_BASE_URL = "http://127.0.0.1:8000"; // change if hosted elsewhere
+
+  const queryInput = document.getElementById('queryInput');
+  const askBtn = document.getElementById('askBtn');
+  const agentReply = document.getElementById('agentReply');
+
+  // Best-effort: pull a temperature out of the agent's plain-text reply so
+  // the dial can react. Falls back to 'clear' if nothing is found.
+  function inferStateFromReply(text){
+    const tempMatch = text.match(/(-?\d+(?:\.\d+)?)\s*°?C/i);
+    const temp = tempMatch ? parseFloat(tempMatch[1]) : null;
+    const lower = text.toLowerCase();
+
+    let state = 'clear';
+    if (/rain|drizzle|thunderstorm/.test(lower)) state = 'rain';
+    else if (/snow|fog|mist/.test(lower)) state = 'cold';
+    else if (temp !== null && temp >= 35) state = 'hot';
+    else if (temp !== null && temp < 5) state = 'cold';
+
+    return { state, temp };
+  }
+
+  async function askWeather(){
+    const query = queryInput.value.trim();
+    if (!query) return;
+
+    askBtn.disabled = true;
+    askBtn.textContent = '...';
+    agentReply.textContent = '';
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/weather`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_query: query }),
+      });
+
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+
+      const data = await res.json();
+      agentReply.textContent = data.agent_response;
+
+      // Update the dial / temperature reading from the real reply
+      const { state, temp } = inferStateFromReply(data.agent_response);
+      setWeatherState(state);
+      if (temp !== null) {
+        document.getElementById('tempReading').textContent = `${temp}°C`;
+      }
+
+    } catch (err) {
+      agentReply.textContent = `Couldn't reach the weather service: ${err.message}`;
+    } finally {
+      askBtn.disabled = false;
+      askBtn.textContent = 'Ask';
+    }
+  }
+
+  askBtn.addEventListener('click', askWeather);
+  queryInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') askWeather(); });
+
+  // Wire up the test switcher buttons
+  document.querySelectorAll('#switcher button').forEach(btn=>{
+    btn.addEventListener('click', ()=> setWeatherState(btn.dataset.state));
+  });
+
+  // Build the rain layer (only animates while data-weather="rain", see CSS)
+  const rainLayer = document.getElementById('rainLayer');
+  for(let i=0; i<70; i++){
+    const d = document.createElement('div');
+    d.className = 'drop';
+    d.style.left = Math.random()*100 + '%';
+    d.style.animationDuration = (0.6 + Math.random()*0.6) + 's';
+    d.style.animationDelay = (Math.random()*2) + 's';
+    d.style.opacity = 0.4 + Math.random()*0.5;
+    rainLayer.appendChild(d);
+  }
+
+  // Build the forecast row
+  const forecastRow = document.getElementById('forecastRow');
+  FORECAST.forEach(f=>{
+    const card = document.createElement('div');
+    card.className = 'forecast-card';
+    card.innerHTML = `
+      <p class="day">${f.day}</p>
+      <svg viewBox="0 0 24 24" fill="var(--accent)">${ICONS[f.type]}</svg>
+      <p class="hi">${f.hi}°</p>
+      <p class="lo">${f.lo}°</p>
+    `;
+    forecastRow.appendChild(card);
+  });
+
+  // Initial state
+  setWeatherState('clear');
+</script>
+</body>
+</html>
