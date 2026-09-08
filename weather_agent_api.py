@@ -248,9 +248,10 @@ async def query_weather(request: WeatherQueryRequest) -> WeatherQueryResponse:
 # --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         "weather_agent_api:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,  # convenient for development; disable in production
+        port=port,
+        reload=False,   # reload should be off in production
     )
