@@ -338,8 +338,8 @@
     <!-- Header -->
     <div class="header">
       <div class="location">
-        <h1>Lahore, Pakistan</h1>
-        <p>Station 24.86°N · Updated just now</p>
+        <h1 id="locationHeading">Lahore, Pakistan</h1>
+        <p id="stationLabel">Station 24.86°N · Updated just now</p>
       </div>
       <div class="switcher" id="switcher">
         <button data-state="clear">Clear</button>
@@ -486,11 +486,26 @@
   // ============================================================
   // BACKEND CONNECTION — calls the FastAPI /api/weather endpoint
   // ============================================================
-const API_BASE_URL = "https://weatherapi-production-1433.up.railway.app";
+  // Empty string = same origin. The frontend is now served by the same
+  // FastAPI app (see the "/" route in weather_agent_api.py), so requests
+  // to /api/weather automatically go to the right place on any domain.
+  const API_BASE_URL = "";
 
   const queryInput = document.getElementById('queryInput');
   const askBtn = document.getElementById('askBtn');
   const agentReply = document.getElementById('agentReply');
+
+  // Pulls a human-friendly location name out of what the user typed,
+  // e.g. "what's the weather in tokyo right now" -> "Tokyo Right Now" is
+  // avoided by trimming trailing filler words, and the result is title-cased.
+  function extractLocationFromQuery(query){
+    const FILLER_TAIL = /\s+(right now|today|now|please|currently)\s*$/i;
+    const match = query.match(/(?:in|for|at)\s+([a-zA-Z\s,.'-]+?)[\?!.,]?$/i);
+    let raw = match ? match[1].trim() : query.trim();
+    raw = raw.replace(FILLER_TAIL, '').trim();
+    if (!raw) return null;
+    return raw.replace(/\b\w/g, c => c.toUpperCase());
+  }
 
   // Best-effort: pull a temperature out of the agent's plain-text reply so
   // the dial can react. Falls back to 'clear' if nothing is found.
@@ -506,6 +521,15 @@ const API_BASE_URL = "https://weatherapi-production-1433.up.railway.app";
     else if (temp !== null && temp < 5) state = 'cold';
 
     return { state, temp };
+  }
+
+  // Pulls the real city name straight out of the agent's reply, e.g.
+  // "Current weather in Tokyo: ..." -> "Tokyo". This is more reliable than
+  // guessing from the user's typed query, since it reflects what the
+  // weather service actually resolved the location to.
+  function extractLocationFromReply(text){
+    const match = text.match(/weather in\s+([a-zA-Z\s,.'-]+?)\s*:/i);
+    return match ? match[1].trim() : null;
   }
 
   async function askWeather(){
@@ -527,6 +551,16 @@ const API_BASE_URL = "https://weatherapi-production-1433.up.railway.app";
 
       const data = await res.json();
       agentReply.textContent = data.agent_response;
+
+      // Update the header with the place that was actually searched —
+      // prefer the name the weather service resolved, fall back to what
+      // the user typed if the reply text doesn't contain it.
+      const resolvedLocation = extractLocationFromReply(data.agent_response)
+        || extractLocationFromQuery(query);
+      if (resolvedLocation) {
+        document.getElementById('locationHeading').textContent = resolvedLocation;
+        document.getElementById('stationLabel').textContent = 'Updated just now';
+      }
 
       // Update the dial / temperature reading from the real reply
       const { state, temp } = inferStateFromReply(data.agent_response);
