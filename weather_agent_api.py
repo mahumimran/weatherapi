@@ -34,6 +34,7 @@ import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from langchain_core.tools import tool
@@ -208,10 +209,16 @@ app.add_middleware(
 )
 
 
-@app.get("/", tags=["Health"])
-async def root():
+@app.get("/health", tags=["Health"])
+async def health():
     """Basic health check endpoint."""
     return {"status": "ok", "service": "weather-agent-api"}
+
+
+@app.get("/", tags=["Health"])
+async def root():
+    """Serves the WeatherDial frontend so the whole app lives on one domain."""
+    return FileResponse("weather_dial_ui.html")
 
 
 @app.post("/api/weather", response_model=WeatherQueryResponse, tags=["Weather"])
@@ -253,5 +260,5 @@ if __name__ == "__main__":
         "weather_agent_api:app",
         host="0.0.0.0",
         port=port,
-        reload=False,   # reload should be off in production
+        reload=False,
     )
